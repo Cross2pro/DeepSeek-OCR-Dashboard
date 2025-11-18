@@ -1,0 +1,15 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.9
+pydantic==2.9.2
+transformers==4.46.3
+tokenizers==0.20.3
+addict
+einops
+easydict
+numpy
+Pillow
+PyMuPDF
+img2pdf
+tqdm
+torchvision

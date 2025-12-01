@@ -10,8 +10,15 @@ model_name = '/home/remote/lee/documents/projects/ds-OCR/ocr_project/model'
 
 
 tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-model = AutoModel.from_pretrained(model_name, _attn_implementation='flash_attention_2', trust_remote_code=True, use_safetensors=True)
-model = model.eval().cuda().to(torch.bfloat16)
+model = AutoModel.from_pretrained(
+    model_name,
+    _attn_implementation='flash_attention_2',
+    trust_remote_code=True,
+    use_safetensors=True,
+    torch_dtype=torch.bfloat16,
+    device_map="cuda",
+)
+model = model.eval()
 
 
 

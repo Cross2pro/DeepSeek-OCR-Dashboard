@@ -25,6 +25,13 @@ const imageNaturalSize = ref({ width: 0, height: 0 })
 const uploadType = ref('image')
 const pageResults = ref([])
 const activePageIndex = ref(0)
+const historyItems = ref([])
+const historyError = ref('')
+const isLoadingHistory = ref(false)
+const isHistoryView = ref(false)
+const historyPreviewUrl = ref('')
+const selectedHistoryId = ref('')
+const regionOutputView = ref('raw')
 
 // 进度相关
 const progressInfo = ref({
@@ -44,8 +51,10 @@ const modeCards = computed(() =>
   }))
 )
 
-const hasImage = computed(() => Boolean(selectedFile.value))
-const canRun = computed(() => hasImage.value && Boolean(selectedMode.value) && !isRunning.value)
+const hasImage = computed(() => Boolean(selectedFile.value) || Boolean(historyPreviewUrl.value))
+const canRun = computed(
+  () => hasImage.value && Boolean(selectedMode.value) && !isRunning.value && !isHistoryView.value
+)
 const uploadLimitLabel = computed(() =>
   uploadLimitMb.value ? uploadLimitMb.value.toFixed(1) : '15'
 )
@@ -53,6 +62,9 @@ const isPdfUpload = computed(() => uploadType.value === 'pdf')
 const hasPages = computed(() => pageResults.value.length > 0)
 const currentPage = computed(() => pageResults.value[activePageIndex.value] || null)
 const previewImageSrc = computed(() => {
+  if (historyPreviewUrl.value) {
+    return historyPreviewUrl.value
+  }
   if (currentPage.value?.imageData) {
     return currentPage.value.imageData
   }
@@ -121,6 +133,10 @@ const lastDuration = computed(() =>
   inferenceResult.value ? `${inferenceResult.value.durationMs.toFixed(0)} ms` : '--'
 )
 
+const regionHasHtmlTable = computed(() => /<table[\s>]/i.test(selectedRegionSnippet.value || ''))
+const regionHtmlTableOutput = computed(() => extractTablesAsHtml(selectedRegionSnippet.value || ''))
+const regionMarkdownTableOutput = computed(() => convertTablesToMarkdown(selectedRegionSnippet.value || ''))
+
 function pushLog(message) {
   activityLog.value = [
     {
@@ -145,9 +161,20 @@ function handleFileChange(event) {
   attachFile(files[0])
 }
 
-function attachFile(file) {
+function attachFile(file, { source = 'upload' } = {}) {
   if (!file) return
+
+  const limitBytes = uploadLimitMb.value ? uploadLimitMb.value * 1024 * 1024 : Infinity
+  if (file.size > limitBytes) {
+    errorMessage.value = `文件大小超过限制：${uploadLimitLabel.value} MB`
+    pushLog('文件大小超出限制，未进行上传')
+    return
+  }
+
   selectedFile.value = file
+  isHistoryView.value = false
+  historyPreviewUrl.value = ''
+  selectedHistoryId.value = ''
   inferenceResult.value = null
   lastRunAt.value = ''
   errorMessage.value = ''
@@ -160,7 +187,8 @@ function attachFile(file) {
     URL.revokeObjectURL(previewUrl.value)
   }
   previewUrl.value = URL.createObjectURL(file)
-  pushLog(`图片已就绪：${file.name}`)
+  const label = file.name || '剪贴板文件'
+  pushLog(`${source === 'paste' ? '已粘贴文件' : '图片已就绪'}：${label}`)
 }
 
 function clearImage() {
@@ -169,10 +197,13 @@ function clearImage() {
   }
   selectedFile.value = null
   previewUrl.value = ''
+  historyPreviewUrl.value = ''
   inferenceResult.value = null
   pageResults.value = []
   activePageIndex.value = 0
   uploadType.value = 'image'
+  isHistoryView.value = false
+  selectedHistoryId.value = ''
   resetLayoutState()
 }
 
@@ -185,6 +216,70 @@ function handleDrop(event) {
 
 function handleDragOver(event) {
   event.preventDefault()
+}
+
+function handlePaste(event) {
+  const items = event.clipboardData?.items || []
+  const fileItem = Array.from(items).find((item) => item.kind === 'file')
+  if (!fileItem) return
+
+  const file = fileItem.getAsFile()
+  if (!file) return
+
+  attachFile(file, { source: 'paste' })
+  event.preventDefault()
+}
+
+function extractTablesAsHtml(html) {
+  if (!html || !/<table[\s>]/i.test(html)) return ''
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+    doc.querySelectorAll('script, style').forEach((el) => el.remove())
+    const tables = Array.from(doc.querySelectorAll('table'))
+    if (!tables.length) return ''
+    return tables.map((table) => table.outerHTML).join('\n')
+  } catch (error) {
+    console.warn('解析表格 HTML 失败', error)
+    return ''
+  }
+}
+
+function tableToMarkdown(tableElement) {
+  const rows = Array.from(tableElement.querySelectorAll('tr')).map((row) =>
+    Array.from(row.querySelectorAll('th, td')).map((cell) =>
+      cell.textContent.trim().replace(/\|/g, '\\|')
+    )
+  )
+  if (!rows.length) return ''
+
+  const headerRow = rows.find((r, idx) => tableElement.querySelectorAll('tr')[idx]?.querySelector('th')) || rows[0]
+  const headerIndex = rows.indexOf(headerRow)
+  const bodyRows = rows.filter((_, idx) => idx !== headerIndex)
+  const headerLine = `| ${headerRow.join(' | ')} |`
+  const dividerLine = `| ${headerRow.map(() => '---').join(' | ')} |`
+  const bodyLines = bodyRows.length
+    ? bodyRows.map((r) => `| ${r.map((cell) => cell || ' ').join(' | ')} |`)
+    : [`| ${headerRow.map(() => ' ').join(' | ')} |`]
+  return [headerLine, dividerLine, ...bodyLines].join('\n')
+}
+
+function convertTablesToMarkdown(html) {
+  if (!html || !/<table[\s>]/i.test(html)) return ''
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+    doc.querySelectorAll('script, style').forEach((el) => el.remove())
+    const tables = Array.from(doc.querySelectorAll('table'))
+    if (!tables.length) return ''
+    return tables
+      .map((table) => tableToMarkdown(table))
+      .filter(Boolean)
+      .join('\n\n')
+  } catch (error) {
+    console.warn('转换 Markdown 表格失败', error)
+    return ''
+  }
 }
 
 function clamp01(value) {
@@ -284,7 +379,13 @@ function handleRegionSelect(regionKey) {
 async function copySelectedRegion() {
   const snippet = selectedRegionSnippet.value?.trim()
   if (!snippet) return
-  await navigator.clipboard.writeText(snippet)
+  let content = snippet
+  if (regionOutputView.value === 'html' && regionHtmlTableOutput.value) {
+    content = regionHtmlTableOutput.value
+  } else if (regionOutputView.value === 'markdown' && regionMarkdownTableOutput.value) {
+    content = regionMarkdownTableOutput.value
+  }
+  await navigator.clipboard.writeText(content)
   pushLog('已复制所选区域文本')
 }
 
@@ -292,6 +393,111 @@ async function copyCurrentPageText() {
   if (!currentPageCleanText.value) return
   await navigator.clipboard.writeText(currentPageCleanText.value)
   pushLog(`已复制第 ${activePageIndex.value + 1} 页文本`)
+}
+
+async function fetchHistory() {
+  isLoadingHistory.value = true
+  historyError.value = ''
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/history`)
+    if (!response.ok) throw new Error('无法获取历史记录')
+    const payload = await response.json()
+    historyItems.value = payload.items || []
+  } catch (error) {
+    historyError.value = error.message || '获取历史记录失败'
+  } finally {
+    isLoadingHistory.value = false
+  }
+}
+
+function applyResultPayload(payload, { fromHistory = false } = {}) {
+  if (!payload) return
+
+  const normalizedPages = Array.isArray(payload.pages) && payload.pages.length
+    ? payload.pages
+    : [
+        {
+          pageIndex: 0,
+          text: payload.text,
+          rawText: payload.rawText,
+          layout: payload.layout,
+          imageData: null,
+        },
+      ]
+
+  inferenceResult.value = payload
+  pageResults.value = normalizedPages
+  activePageIndex.value = 0
+  lastRunAt.value = payload.createdAt || new Date().toLocaleString()
+  historyPreviewUrl.value = normalizedPages[0]?.imageData || ''
+  selectedHistoryId.value = payload.historyId || ''
+  uploadType.value = payload.isPdf ? 'pdf' : 'image'
+  isHistoryView.value = fromHistory
+  errorMessage.value = ''
+  progressInfo.value = {
+    stage: 'complete',
+    percent: 100,
+    message: fromHistory ? '历史结果已加载' : '识别完成！',
+    current: 100,
+    total: 100,
+  }
+
+  if (fromHistory) {
+    selectedFile.value = {
+      name: payload.fileName,
+      size: payload.fileSize,
+      lastModified: Date.parse(payload.createdAt) || Date.now(),
+      history: true,
+    }
+    previewUrl.value = historyPreviewUrl.value
+  }
+}
+
+async function loadHistory(historyId) {
+  if (!historyId) return
+  isLoadingHistory.value = true
+  historyError.value = ''
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/history/${historyId}`)
+    if (!response.ok) throw new Error('无法加载历史记录')
+    const payload = await response.json()
+    applyResultPayload(payload, { fromHistory: true })
+    pushLog(`已打开历史记录：${payload.fileName || historyId}`)
+  } catch (error) {
+    historyError.value = error.message || '加载历史记录失败'
+  } finally {
+    isLoadingHistory.value = false
+  }
+}
+
+async function downloadMarkdown() {
+  if (!inferenceResult.value?.text) return
+
+  const historyId = selectedHistoryId.value || inferenceResult.value?.historyId
+  const fallbackName = inferenceResult.value?.fileName || 'ocr-result'
+  const downloadBase = fallbackName.replace(/\.[^/.]+$/, '') || 'ocr-result'
+
+  try {
+    let blob
+    if (historyId) {
+      const response = await fetch(`${API_BASE_URL}/api/history/${historyId}/download?format=md`)
+      if (!response.ok) throw new Error('下载失败')
+      blob = await response.blob()
+    } else {
+      blob = new Blob([inferenceResult.value.text], {
+        type: 'text/markdown;charset=utf-8',
+      })
+    }
+
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `${downloadBase}.md`
+    link.click()
+    URL.revokeObjectURL(link.href)
+    pushLog('结果已下载为 Markdown')
+  } catch (error) {
+    errorMessage.value = error.message || '下载失败'
+  }
 }
 
 async function fetchModes() {
@@ -338,6 +544,8 @@ async function runInference() {
   inferenceResult.value = null
   pageResults.value = []
   activePageIndex.value = 0
+  selectedHistoryId.value = ''
+  isHistoryView.value = false
   progressInfo.value = { stage: 'pending', percent: 0, message: '准备开始...', current: 0, total: 100 }
   pushLog('开始推理任务')
 
@@ -411,23 +619,10 @@ async function runInference() {
     }
 
     const payload = await response.json()
-    inferenceResult.value = payload
-    const pages = Array.isArray(payload.pages) && payload.pages.length
-      ? payload.pages
-      : [
-          {
-            pageIndex: 0,
-            text: payload.text,
-            rawText: payload.rawText,
-            layout: payload.layout,
-            imageData: null,
-          },
-        ]
-    pageResults.value = pages
-    setActivePage(0)
-    lastRunAt.value = new Date().toLocaleString()
+    applyResultPayload(payload, { fromHistory: false })
     progressInfo.value = { stage: 'complete', percent: 100, message: '识别完成！', current: 100, total: 100 }
     pushLog(`推理完成，耗时 ${payload.durationMs.toFixed(0)} ms`)
+    fetchHistory()
   } catch (error) {
     errorMessage.value = error.message || '推理失败，请稍后重试'
     progressInfo.value = { stage: 'error', percent: 0, message: errorMessage.value, current: 0, total: 100 }
@@ -468,6 +663,7 @@ async function copyOutput() {
 
 onMounted(() => {
   fetchModes()
+  fetchHistory()
 })
 
 watch(activePageIndex, (newIndex) => {
@@ -487,6 +683,10 @@ watch(pageResults, (pages) => {
     return
   }
   applyLayoutFromPage(pages[activePageIndex.value])
+})
+
+watch(selectedRegionSnippet, () => {
+  regionOutputView.value = 'raw'
 })
 
 onBeforeUnmount(() => {
@@ -514,6 +714,7 @@ onBeforeUnmount(() => {
           <span class="status-pill" :class="serviceOnline ? 'online' : 'offline'">
             {{ serviceOnline ? '推理服务运行中' : '推理服务离线' }}
           </span>
+          <span class="status-pill light" v-if="isHistoryView">历史记录浏览</span>
           <span class="status-pill light">API {{ API_BASE_URL }}</span>
           <span class="status-pill light" v-if="loadError">{{ loadError }}</span>
         </div>
@@ -581,6 +782,17 @@ onBeforeUnmount(() => {
               <small>我们不会上传到云端，所有推理都在本机完成。</small>
             </div>
           </label>
+
+          <div class="paste-area">
+            <label for="clipboard-upload">或使用粘贴上传</label>
+            <textarea
+              id="clipboard-upload"
+              rows="2"
+              placeholder="在此按 Ctrl+V / Cmd+V 粘贴截图或文件，自动加入上传队列"
+              @paste="handlePaste"
+            ></textarea>
+            <small>支持图片与 PDF，超出大小限制会被忽略。</small>
+          </div>
         </article>
 
         <article class="card mode-card">
@@ -634,6 +846,7 @@ onBeforeUnmount(() => {
             <p class="hint">
               推理会占用 GPU，请确保已经按 requirements 安装依赖并加载模型。
             </p>
+            <p v-if="isHistoryView" class="hint">当前处于历史查看模式，上传新文件以重新推理。</p>
             <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
           </div>
 
@@ -667,15 +880,48 @@ onBeforeUnmount(() => {
           <p v-else class="muted">暂无日志</p>
         </article>
 
+        <article class="card history-card">
+          <div class="card-header">
+            <div>
+              <h2>历史记录</h2>
+              <p>缓存最近的推理结果，包含图像和 PDF 预览。</p>
+            </div>
+            <button class="ghost" type="button" @click="fetchHistory" :disabled="isLoadingHistory">
+              {{ isLoadingHistory ? '刷新中...' : '刷新' }}
+            </button>
+          </div>
+          <p v-if="historyError" class="error">{{ historyError }}</p>
+          <ul v-if="historyItems.length" class="history-list">
+            <li v-for="item in historyItems" :key="item.id" :class="{ active: selectedHistoryId === item.id }">
+              <div>
+                <strong>{{ item.fileName || '未命名文件' }}</strong>
+                <small>{{ item.createdAt || '--' }}</small>
+                <p class="muted">
+                  模式：{{ availableModes[item.mode]?.label || item.mode || '--' }} · 页数：{{ item.pages || 1 }} · {{ item.isPdf ? 'PDF' : '图像' }}
+                </p>
+              </div>
+              <button type="button" class="ghost" @click="loadHistory(item.id)" :disabled="isRunning">
+                {{ selectedHistoryId === item.id ? '查看中' : '查看' }}
+              </button>
+            </li>
+          </ul>
+          <p v-else class="muted">暂无缓存历史</p>
+        </article>
+
         <article class="card output-card">
           <div class="card-header">
             <div>
               <h2>推理输出</h2>
               <p>DeepSeek-OCR 将解析结构化文本。</p>
             </div>
-            <button type="button" class="ghost" :disabled="!inferenceResult?.text" @click="copyOutput">
-              复制
-            </button>
+            <div class="output-actions">
+              <button type="button" class="ghost" :disabled="!inferenceResult?.text" @click="downloadMarkdown">
+                下载
+              </button>
+              <button type="button" class="ghost" :disabled="!inferenceResult?.text" @click="copyOutput">
+                复制
+              </button>
+            </div>
           </div>
           <div class="output-body" :class="{ loading: isRunning }">
             <p v-if="isRunning" class="muted">推理进行中，请稍候...</p>
@@ -831,8 +1077,40 @@ onBeforeUnmount(() => {
           <div v-if="selectedRegion" class="layout-inspector">
             <p><strong>类型：</strong>{{ selectedRegion.label }}</p>
             <p><strong>坐标：</strong>{{ selectedRegion.box.absolute.join(', ') }}</p>
-            <p><strong>内容：</strong></p>
-            <pre>{{ selectedRegionSnippet || '该区域暂未匹配到文本，可参考全量输出。' }}</pre>
+            <div class="output-switch">
+              <span>内容</span>
+              <div class="output-tabs">
+                <button
+                  type="button"
+                  :class="{ active: regionOutputView === 'raw' }"
+                  @click="regionOutputView = 'raw'"
+                >
+                  原文
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: regionOutputView === 'html' }"
+                  :disabled="!regionHasHtmlTable"
+                  @click="regionOutputView = 'html'"
+                >
+                  HTML 表格
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: regionOutputView === 'markdown' }"
+                  :disabled="!regionHasHtmlTable"
+                  @click="regionOutputView = 'markdown'"
+                >
+                  Markdown 表格
+                </button>
+              </div>
+            </div>
+            <p v-if="selectedRegionSnippet && !regionHasHtmlTable" class="muted helper">
+              未检测到表格标签，显示原文。
+            </p>
+            <div v-if="regionOutputView === 'html' && regionHtmlTableOutput" class="html-preview" v-html="regionHtmlTableOutput"></div>
+            <pre v-else-if="regionOutputView === 'markdown' && regionMarkdownTableOutput">{{ regionMarkdownTableOutput }}</pre>
+            <pre v-else>{{ selectedRegionSnippet || '该区域暂未匹配到文本，可参考全量输出。' }}</pre>
           </div>
           <p v-else class="muted">选择任意区域以查看具体内容。</p>
         </article>
@@ -1095,6 +1373,29 @@ onBeforeUnmount(() => {
   background: rgba(99, 102, 241, 0.08);
 }
 
+.paste-area {
+  margin-top: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.paste-area textarea {
+  width: 100%;
+  border: 1px dashed rgba(99, 102, 241, 0.35);
+  border-radius: 0.9rem;
+  padding: 0.65rem 0.8rem;
+  font-size: 0.95rem;
+  resize: none;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.paste-area label {
+  font-weight: 600;
+  color: #0f172a;
+}
+
 .mode-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1337,6 +1638,43 @@ onBeforeUnmount(() => {
   color: #1d4ed8;
 }
 
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.history-card li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  border: 1px dashed #e2e8f0;
+  padding: 0.8rem;
+  border-radius: 0.9rem;
+}
+
+.history-card li.active {
+  border-color: #6366f1;
+  background: #eef2ff;
+}
+
+.history-card strong {
+  display: block;
+  color: #0f172a;
+}
+
+.history-card small {
+  color: #64748b;
+}
+
+.history-card .muted {
+  margin: 0.2rem 0 0;
+}
+
 .muted {
   color: #94a3b8;
 }
@@ -1566,6 +1904,51 @@ onBeforeUnmount(() => {
   margin-top: 0.4rem;
 }
 
+.output-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.output-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.output-switch span {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.output-tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.output-tabs button {
+  border-radius: 999px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: transparent;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: #4c1d95;
+}
+
+.output-tabs button.active {
+  background: #6366f1;
+  color: #fff;
+  border-color: #6366f1;
+}
+
+.output-tabs button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .output-card pre {
   white-space: pre-wrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
@@ -1587,6 +1970,31 @@ onBeforeUnmount(() => {
 
 .output-body.loading {
   color: #0f172a;
+}
+
+.html-preview {
+  width: 100%;
+  text-align: left;
+}
+
+.html-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.75rem;
+}
+
+.html-preview th,
+.html-preview td {
+  border: 1px solid #e2e8f0;
+  padding: 0.5rem;
+  text-align: left;
+  font-size: 0.9rem;
+  color: #0f172a;
+}
+
+.html-preview th {
+  background: #f8fafc;
+  font-weight: 600;
 }
 
 .meta-card ul {

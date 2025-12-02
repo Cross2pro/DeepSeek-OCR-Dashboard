@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import logging
+import datetime
 import os
 import re
 import shutil
@@ -24,7 +25,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from transformers import AutoModel, AutoTokenizer
@@ -118,6 +119,9 @@ class OCRResponse(BaseModel):
     durationMs: float
     fileName: str
     fileSize: int
+    createdAt: str
+    isPdf: bool = False
+    historyId: Optional[str] = None
     layout: Optional[Dict[str, Any]] = None
     pages: List[OCRPage]
 
@@ -158,6 +162,12 @@ def _model_dir() -> Path:
 
 def _output_root() -> Path:
     root = Path(os.getenv("DEEPSEEK_OCR_RUNS_DIR", Path(__file__).resolve().parent / "runs"))
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _history_root() -> Path:
+    root = _output_root() / "history"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -268,6 +278,101 @@ def _encode_image_to_data_url(image_path: Path) -> str:
     with image_path.open("rb") as image_file:
         encoded = base64.b64encode(image_file.read()).decode("utf-8")
     return f"data:{mime};base64,{encoded}"
+
+
+def _persist_history_result(
+    result: Dict[str, Any],
+    source_path: Path,
+    page_paths: List[Path],
+    is_pdf: bool,
+) -> str:
+    """Cache inference output (text + files) under runs/history."""
+    history_id = f"{int(time.time())}-{uuid.uuid4().hex[:8]}"
+    run_dir = _history_root() / history_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    saved_pages: List[str] = []
+    for idx, page_path in enumerate(page_paths):
+        target = run_dir / f"page_{idx + 1}{page_path.suffix or '.png'}"
+        try:
+            shutil.copy2(page_path, target)
+            saved_pages.append(target.name)
+        except Exception as exc:  # pragma: no cover - best effort cache
+            LOGGER.warning("Failed to cache page %s: %s", page_path, exc)
+
+    source_name = f"source{source_path.suffix or '.bin'}"
+    try:
+        shutil.copy2(source_path, run_dir / source_name)
+    except Exception as exc:  # pragma: no cover - best effort cache
+        LOGGER.warning("Failed to cache source file %s: %s", source_path, exc)
+
+    result.update(
+        {
+            "historyId": history_id,
+            "createdAt": created_at,
+            "isPdf": is_pdf,
+            "sourceFile": source_name,
+            "pageFiles": saved_pages,
+        }
+    )
+
+    with (run_dir / "result.json").open("w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    if result.get("text"):
+        (run_dir / "result.md").write_text(result["text"], encoding="utf-8")
+    if result.get("rawText"):
+        (run_dir / "raw.txt").write_text(result["rawText"], encoding="utf-8")
+
+    return history_id
+
+
+def _list_history(limit: int = 30) -> List[Dict[str, Any]]:
+    root = _history_root()
+    entries: List[Dict[str, Any]] = []
+    if not root.exists():
+        return entries
+
+    for run_dir in sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        meta_file = run_dir / "result.json"
+        if not meta_file.exists():
+            continue
+        try:
+            data = json.loads(meta_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        entries.append(
+            {
+                "id": data.get("historyId") or run_dir.name,
+                "createdAt": data.get("createdAt"),
+                "fileName": data.get("fileName"),
+                "fileSize": data.get("fileSize"),
+                "mode": data.get("mode"),
+                "durationMs": data.get("durationMs"),
+                "pages": len(data.get("pages", [])),
+                "isPdf": data.get("isPdf", False),
+            }
+        )
+
+        if len(entries) >= limit:
+            break
+
+    return entries
+
+
+def _load_history(history_id: str) -> Tuple[Dict[str, Any], Path]:
+    run_dir = _history_root() / history_id
+    meta_file = run_dir / "result.json"
+    if not meta_file.exists():
+        raise FileNotFoundError(f"历史记录不存在: {history_id}")
+
+    data = json.loads(meta_file.read_text(encoding="utf-8"))
+    data.setdefault("historyId", history_id)
+    data.setdefault("isPdf", False)
+    data.setdefault("pageFiles", [])
+    return data, run_dir
 
 
 def _load_runtime() -> None:
@@ -446,6 +551,8 @@ async def run_ocr(
     aggregate_texts: List[str] = []
     aggregate_raw: List[str] = []
     total_pages = len(page_paths)
+    created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    history_id: Optional[str] = None
 
     try:
         async with inference_lock:
@@ -468,7 +575,7 @@ async def run_ocr(
                 )
                 single_duration = round((time.perf_counter() - single_start) * 1000, 2)
 
-                image_data = _encode_image_to_data_url(page_path) if is_pdf else None
+                image_data = _encode_image_to_data_url(page_path)
 
                 page_results.append(
                     {
@@ -492,45 +599,64 @@ async def run_ocr(
                         100,
                         f"第 {idx + 1}/{total_pages} 页识别完成"
                     )
+
+        if task_id:
+            update_progress("postprocessing", 95, 100, "正在整理结果...")
+
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+        layout = page_results[0]["layout"] if page_results else None
+        aggregate_text = "\n\n".join(aggregate_texts) if aggregate_texts else ""
+        aggregate_raw_text = "\n\n".join(aggregate_raw) if aggregate_raw else ""
+
+        pages_payload: List[Dict[str, Any]] = [
+            {
+                "pageIndex": page["pageIndex"],
+                "text": page["text"],
+                "rawText": page["rawText"],
+                "layout": page["layout"],
+                "imageData": page["imageData"],
+                "durationMs": page.get("durationMs"),
+            }
+            for page in page_results
+        ]
+
+        response_payload: Dict[str, Any] = {
+            "mode": mode,
+            "prompt": prompt_value,
+            "text": aggregate_text or page_results[0]["text"],
+            "rawText": aggregate_raw_text or page_results[0]["rawText"],
+            "durationMs": duration_ms,
+            "fileName": filename,
+            "fileSize": file_size,
+            "layout": layout,
+            "pages": pages_payload,
+            "createdAt": created_at,
+            "isPdf": is_pdf,
+            "historyId": None,
+        }
+
+        # 缓存历史结果（不影响主流程）
+        try:
+            history_id = await run_in_threadpool(
+                partial(
+                    _persist_history_result,
+                    json.loads(json.dumps(response_payload, ensure_ascii=False)),
+                    tmp_file,
+                    page_paths,
+                    is_pdf,
+                )
+            )
+            response_payload["historyId"] = history_id
+        except Exception as exc:  # pragma: no cover - cache best effort
+            LOGGER.warning("Failed to persist history: %s", exc)
+
+        if task_id:
+            update_progress("complete", 100, 100, "识别完成！")
+            asyncio.get_event_loop().call_later(60, lambda: progress_store.pop(task_id, None))
+
+        return OCRResponse(**response_payload)
     finally:
         shutil.rmtree(tmp_file.parent, ignore_errors=True)
-
-    if task_id:
-        update_progress("postprocessing", 95, 100, "正在整理结果...")
-
-    duration_ms = round((time.perf_counter() - start) * 1000, 2)
-    layout = page_results[0]["layout"] if page_results else None
-    aggregate_text = "\n\n".join(aggregate_texts) if aggregate_texts else ""
-    aggregate_raw_text = "\n\n".join(aggregate_raw) if aggregate_raw else ""
-
-    pages_payload = [
-        OCRPage(
-            pageIndex=page["pageIndex"],
-            text=page["text"],
-            rawText=page["rawText"],
-            layout=page["layout"],
-            imageData=page["imageData"],
-            durationMs=page.get("durationMs"),
-        )
-        for page in page_results
-    ]
-
-    if task_id:
-        update_progress("complete", 100, 100, "识别完成！")
-        # 清理进度记录（延迟清理，给前端时间获取最终状态）
-        asyncio.get_event_loop().call_later(60, lambda: progress_store.pop(task_id, None))
-
-    return OCRResponse(
-        mode=mode,
-        prompt=prompt_value,
-        text=aggregate_text or page_results[0]["text"],
-        rawText=aggregate_raw_text or page_results[0]["rawText"],
-        durationMs=duration_ms,
-        fileName=filename,
-        fileSize=file_size,
-        layout=layout,
-        pages=pages_payload,
-    )
 
 
 @app.get("/api/progress/{task_id}")
@@ -588,6 +714,68 @@ async def create_task() -> Dict[str, str]:
         "percent": 0,
     }
     return {"taskId": task_id}
+
+
+@app.get("/api/history")
+async def history_list(limit: int = 30) -> Dict[str, Any]:
+    entries = await run_in_threadpool(partial(_list_history, limit))
+    return {"items": entries}
+
+
+@app.get("/api/history/{history_id}")
+async def history_detail(history_id: str) -> Dict[str, Any]:
+    try:
+        data, run_dir = await run_in_threadpool(partial(_load_history, history_id))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="历史记录不存在。")
+
+    page_files = data.get("pageFiles") or []
+    pages = data.get("pages") or []
+
+    # 确保历史记录里有可预览的图像
+    for idx, page in enumerate(pages):
+        if page.get("imageData"):
+            continue
+        if idx < len(page_files):
+            image_path = run_dir / page_files[idx]
+            if image_path.exists():
+                try:
+                    page["imageData"] = _encode_image_to_data_url(image_path)
+                except Exception:  # pragma: no cover - best effort
+                    pass
+
+    data["pages"] = pages
+    return data
+
+
+@app.get("/api/history/{history_id}/download")
+async def history_download(history_id: str, format: str = "md"):
+    try:
+        data, run_dir = await run_in_threadpool(partial(_load_history, history_id))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="历史记录不存在。")
+
+    fmt = (format or "md").lower()
+    base_name = Path(data.get("fileName") or "ocr_result").stem
+    if fmt == "md":
+        file_path = run_dir / "result.md"
+        media_type = "text/markdown; charset=utf-8"
+        download_name = f"{base_name}.md"
+    elif fmt == "json":
+        file_path = run_dir / "result.json"
+        media_type = "application/json"
+        download_name = f"{base_name}.json"
+    elif fmt == "raw":
+        file_path = run_dir / "raw.txt"
+        media_type = "text/plain; charset=utf-8"
+        download_name = f"{base_name}_raw.txt"
+    else:
+        raise HTTPException(status_code=400, detail="不支持的下载格式。")
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="未找到对应的结果文件。")
+
+    return FileResponse(file_path, media_type=media_type, filename=download_name)
 
 
 if __name__ == "__main__":

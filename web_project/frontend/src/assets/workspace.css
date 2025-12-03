@@ -89,6 +89,39 @@
   font-size: 1.4rem;
 }
 
+.tab-nav {
+  display: flex;
+  gap: 0.6rem;
+  margin: 1rem 0 0.25rem;
+}
+
+.tab-button {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  background: #fff;
+  padding: 0.45rem 1.1rem;
+  cursor: pointer;
+  color: #475467;
+  font-weight: 600;
+}
+
+.tab-button.active {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.18);
+}
+
+.settings-workspace .workflow-panel {
+  position: static;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(320px, 1.2fr) minmax(420px, 1.8fr);
@@ -259,6 +292,126 @@
 .mode-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.layout-shell {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 1rem;
+}
+
+.history-sidebar {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 16px;
+  padding: 1rem;
+  position: sticky;
+  top: 1.5rem;
+  height: calc(100vh - 3rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.3);
+  transition: width 0.2s ease, padding 0.2s ease;
+}
+
+.history-sidebar.collapsed {
+  width: 64px;
+  padding: 0.75rem;
+  overflow: hidden;
+}
+
+.collapse-btn {
+  width: 100%;
+  border: 1px solid rgba(226, 232, 240, 0.2);
+  background: transparent;
+  color: #e2e8f0;
+  border-radius: 12px;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+
+.history-sidebar.collapsed .collapse-btn {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  height: 100%;
+}
+
+.history-sidebar.collapsed .sidebar-content {
+  display: none;
+}
+
+.sidebar-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  height: 100%;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.sidebar-header h3 {
+  margin: 0;
+  color: #fff;
+}
+
+.sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.sidebar-item {
+  width: 100%;
+  text-align: left;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(226, 232, 240, 0.12);
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.sidebar-item.active {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.15);
+}
+
+.sidebar-item strong {
+  display: block;
+  color: #fff;
+}
+
+.sidebar-item small {
+  color: #94a3b8;
+}
+
+.sidebar-settings {
+  margin-top: auto;
+  border: 1px solid rgba(226, 232, 240, 0.3);
+  background: rgba(99, 102, 241, 0.2);
+  color: #fff;
+  padding: 0.6rem 0.8rem;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.sidebar-error {
+  margin: 0;
+}
+
+.main-area {
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
 }
 
@@ -878,6 +1031,19 @@
 }
 
 @media (max-width: 1024px) {
+  .layout-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .history-sidebar {
+    position: static;
+    height: auto;
+  }
+
+  .history-sidebar.collapsed {
+    width: auto;
+  }
+
   .workspace {
     grid-template-columns: 1fr;
   }

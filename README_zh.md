@@ -4,6 +4,7 @@
 
 FastAPI 后端 + Vite/Vue 前端的 DeepSeek-OCR 本地演示项目。
 
+演示动画：
 ![演示动画](assets/showcase.gif)
 
 ## 功能特性 ✨

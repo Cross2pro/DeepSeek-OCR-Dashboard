@@ -4,7 +4,7 @@ English | [中文](README_zh.md)
 
 FastAPI + Vite/Vue wrapper around the DeepSeek-OCR model for quick local testing. 🎯
 
-
+Showcase:
 ![Demo showcase](assets/showcase.gif)
 
 ## Features ✨

@@ -15,7 +15,7 @@ function handleInput(event) {
 
 <template>
   <article class="card prompt-card">
-    <h2>步骤 3 · 配置提示词</h2>
+    <h2>配置提示词</h2>
     <textarea
       rows="4"
       :value="modelValue"

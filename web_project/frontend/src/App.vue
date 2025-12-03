@@ -12,7 +12,6 @@ import PageTextCard from './components/PageTextCard.vue'
 import PromptCard from './components/PromptCard.vue'
 import UploadCard from './components/UploadCard.vue'
 import VisualPreviewCard from './components/VisualPreviewCard.vue'
-import WorkflowStepsCard from './components/WorkflowStepsCard.vue'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
 
@@ -712,129 +711,178 @@ onBeforeUnmount(() => {
     progressEventSource.value = null
   }
 })
+
+const isSidebarCollapsed = ref(false)
+const showSettings = ref(false)
 </script>
 
 <template>
-  <div class="page">
-    <HeroSection
-      :service-online="serviceOnline"
-      :is-history-view="isHistoryView"
-      :api-base-url="API_BASE_URL"
-      :load-error="loadError"
-      :available-mode-count="Object.keys(availableModes).length"
-      :last-duration="lastDuration"
-      :last-run-at="lastRunAt"
-    />
+  <div class="page layout-shell">
+    <aside class="history-sidebar" :class="{ collapsed: isSidebarCollapsed }">
+      <button class="collapse-btn" type="button" @click="isSidebarCollapsed = !isSidebarCollapsed">
+        <span v-if="isSidebarCollapsed">▶</span>
+        <span v-else>◀</span>
+      </button>
 
-    <div class="workspace">
-      <section class="panel workflow-panel">
-        <WorkflowStepsCard :steps="workflowSteps" />
+      <div v-if="!isSidebarCollapsed" class="sidebar-content">
+        <div class="sidebar-header">
+          <div>
+            <p class="eyebrow">历史记录</p>
+            <h3>推理列表</h3>
+          </div>
+          <button class="ghost" type="button" @click="fetchHistory" :disabled="isLoadingHistory">
+            {{ isLoadingHistory ? '刷新中...' : '刷新' }}
+          </button>
+        </div>
 
-        <UploadCard
-          :has-image="hasImage"
-          :is-pdf-upload="isPdfUpload"
-          :selected-file="selectedFile"
-          :upload-limit-label="uploadLimitLabel"
-          :format-bytes="formatBytes"
-          :preview-url="previewUrl"
-          :on-file-change="handleFileChange"
-          :on-drag-over="handleDragOver"
-          :on-drop="handleDrop"
-          :on-paste="handlePaste"
-          :on-clear="clearImage"
-        />
+        <p v-if="historyError" class="error sidebar-error">{{ historyError }}</p>
+        <div v-if="historyItems.length" class="sidebar-list">
+          <button
+            v-for="item in historyItems"
+            :key="item.id"
+            type="button"
+            class="sidebar-item"
+            :class="{ active: selectedHistoryId === item.id }"
+            @click="loadHistory(item.id)"
+            :disabled="isRunning"
+          >
+            <div class="item-title">
+              <strong>{{ item.fileName || '未命名文件' }}</strong>
+              <small>{{ item.createdAt || '--' }}</small>
+            </div>
+            <p class="muted">
+              模式：{{ availableModes[item.mode]?.label || item.mode || '--' }} · 页：{{ item.pages || 1 }} · {{ item.isPdf ? 'PDF' : '图像' }}
+            </p>
+          </button>
+        </div>
+        <p v-else class="muted">暂无缓存历史</p>
 
-        <ModeCard
-          :mode-cards="modeCards"
-          :is-fetching-modes="isFetchingModes"
-          :on-fetch-modes="fetchModes"
-          :on-select-mode="selectMode"
-        />
+        <button class="sidebar-settings" type="button" @click="showSettings = true">
+          打开设置
+        </button>
+      </div>
+    </aside>
 
-        <PromptCard v-model="prompt" />
+    <main class="main-area">
+      <HeroSection
+        :service-online="serviceOnline"
+        :is-history-view="isHistoryView"
+        :api-base-url="API_BASE_URL"
+        :load-error="loadError"
+        :available-mode-count="Object.keys(availableModes).length"
+        :last-duration="lastDuration"
+        :last-run-at="lastRunAt"
+      />
 
-        <ActionCard
-          :can-run="canRun"
-          :is-running="isRunning"
-          :run-inference="runInference"
-          :error-message="errorMessage"
-          :is-history-view="isHistoryView"
-          :progress-info="progressInfo"
-          :get-stage-label="getStageLabel"
-        />
+      <div class="workspace">
+        <section class="panel workflow-panel">
+          <UploadCard
+            :has-image="hasImage"
+            :is-pdf-upload="isPdfUpload"
+            :selected-file="selectedFile"
+            :upload-limit-label="uploadLimitLabel"
+            :format-bytes="formatBytes"
+            :preview-url="previewUrl"
+            :on-file-change="handleFileChange"
+            :on-drag-over="handleDragOver"
+            :on-drop="handleDrop"
+            :on-paste="handlePaste"
+            :on-clear="clearImage"
+          />
 
-        <LogCard :activity-log="activityLog" />
+          <ActionCard
+            :can-run="canRun"
+            :is-running="isRunning"
+            :run-inference="runInference"
+            :error-message="errorMessage"
+            :is-history-view="isHistoryView"
+            :progress-info="progressInfo"
+            :get-stage-label="getStageLabel"
+          />
 
-        <HistoryCard
-          :history-items="historyItems"
-          :history-error="historyError"
-          :is-loading-history="isLoadingHistory"
-          :fetch-history="fetchHistory"
-          :selected-history-id="selectedHistoryId"
-          :is-running="isRunning"
-          :available-modes="availableModes"
-          :load-history="loadHistory"
-        />
+          <OutputCard
+            :inference-result="inferenceResult"
+            :is-running="isRunning"
+            :download-markdown="downloadMarkdown"
+            :copy-output="copyOutput"
+          />
 
-        <OutputCard
-          :inference-result="inferenceResult"
-          :is-running="isRunning"
-          :download-markdown="downloadMarkdown"
-          :copy-output="copyOutput"
-        />
+          <MetaCard
+            :inference-result="inferenceResult"
+            :available-modes="availableModes"
+            :format-bytes="formatBytes"
+          />
 
-        <MetaCard
-          :inference-result="inferenceResult"
-          :available-modes="availableModes"
-          :format-bytes="formatBytes"
-        />
-      </section>
+          <LogCard :activity-log="activityLog" />
+        </section>
 
-      <section class="panel visual-panel">
-        <VisualPreviewCard
-          :has-image="hasImage"
-          :has-layout="hasLayout"
-          :preview-mode="previewMode"
-          :set-preview-mode="setPreviewMode"
-          :page-results="pageResults"
-          :active-page-index="activePageIndex"
-          :set-active-page="setActivePage"
-          :preview-image-src="previewImageSrc"
-          :layout-regions="layoutRegions"
-          :active-region-key="activeRegionKey"
-          :handle-region-select="handleRegionSelect"
-          :box-percent-style="boxPercentStyle"
-          :aspect-ratio-style="aspectRatioStyle"
-          :selected-file="selectedFile"
-          :format-bytes="formatBytes"
-          :available-modes="availableModes"
-          :selected-mode="selectedMode"
-          :is-pdf-upload="isPdfUpload"
-        />
+        <section class="panel visual-panel">
+          <VisualPreviewCard
+            :has-image="hasImage"
+            :has-layout="hasLayout"
+            :preview-mode="previewMode"
+            :set-preview-mode="setPreviewMode"
+            :page-results="pageResults"
+            :active-page-index="activePageIndex"
+            :set-active-page="setActivePage"
+            :preview-image-src="previewImageSrc"
+            :layout-regions="layoutRegions"
+            :active-region-key="activeRegionKey"
+            :handle-region-select="handleRegionSelect"
+            :box-percent-style="boxPercentStyle"
+            :aspect-ratio-style="aspectRatioStyle"
+            :selected-file="selectedFile"
+            :format-bytes="formatBytes"
+            :available-modes="availableModes"
+            :selected-mode="selectedMode"
+            :is-pdf-upload="isPdfUpload"
+          />
 
-        <LayoutDetailsCard
-          :has-layout="hasLayout"
-          :layout-regions="layoutRegions"
-          :active-region-key="activeRegionKey"
-          :handle-region-select="handleRegionSelect"
-          :selected-region="selectedRegion"
-          :selected-region-snippet="selectedRegionSnippet"
-          :copy-selected-region="copySelectedRegion"
-          v-model:region-output-view="regionOutputView"
-          :region-has-html-table="regionHasHtmlTable"
-          :region-html-table-output="regionHtmlTableOutput"
-          :region-markdown-table-output="regionMarkdownTableOutput"
-        />
+          <LayoutDetailsCard
+            :has-layout="hasLayout"
+            :layout-regions="layoutRegions"
+            :active-region-key="activeRegionKey"
+            :handle-region-select="handleRegionSelect"
+            :selected-region="selectedRegion"
+            :selected-region-snippet="selectedRegionSnippet"
+            :copy-selected-region="copySelectedRegion"
+            v-model:region-output-view="regionOutputView"
+            :region-has-html-table="regionHasHtmlTable"
+            :region-html-table-output="regionHtmlTableOutput"
+            :region-markdown-table-output="regionMarkdownTableOutput"
+          />
 
-        <PageTextCard
-          :current-page="currentPage"
-          :current-page-clean-text="currentPageCleanText"
-          :copy-current-page-text="copyCurrentPageText"
-          :active-page-index="activePageIndex"
-        />
+          <PageTextCard
+            :current-page="currentPage"
+            :current-page-clean-text="currentPageCleanText"
+            :copy-current-page-text="copyCurrentPageText"
+            :active-page-index="activePageIndex"
+          />
+        </section>
+      </div>
+    </main>
+
+    <div v-if="showSettings" class="settings-modal">
+      <div class="settings-overlay" @click="showSettings = false"></div>
+      <section class="settings-panel">
+        <header class="settings-header">
+          <div>
+            <p class="eyebrow">配置</p>
+          </div>
+        </header>
+        <button class="settings-close" type="button" @click="showSettings = false">✕</button>
+
+        <div class="settings-grid">
+          <ModeCard
+            :mode-cards="modeCards"
+            :is-fetching-modes="isFetchingModes"
+            :on-fetch-modes="fetchModes"
+            :on-select-mode="selectMode"
+          />
+
+          <PromptCard v-model="prompt" />
+        </div>
       </section>
     </div>
   </div>
 </template>
-
-

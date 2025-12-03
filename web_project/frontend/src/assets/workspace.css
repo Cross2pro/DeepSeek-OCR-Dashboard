@@ -112,14 +112,76 @@
   box-shadow: 0 8px 20px rgba(99, 102, 241, 0.18);
 }
 
-.settings-workspace .workflow-panel {
-  position: static;
-}
-
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 1rem;
+}
+
+.settings-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.settings-shell .workflow-panel {
+  position: static;
+}
+
+.settings-modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 30;
+}
+
+.settings-overlay {
+  position: absolute;
+  inset: 0;
+  backdrop-filter: blur(4px);
+  background: radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.15), transparent 35%),
+    radial-gradient(circle at 80% 30%, rgba(14, 165, 233, 0.18), transparent 40%),
+    rgba(15, 23, 42, 0.55);
+}
+
+.settings-panel {
+  position: relative;
+  width: min(960px, 92vw);
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 20px;
+  padding: 1.5rem;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08), 0 10px 30px rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  z-index: 1;
+}
+
+.settings-panel h2 {
+  margin: 0.1rem 0;
+  color: #0f172a;
+}
+
+.settings-panel .ghost {
+  color: #475467;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.settings-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: #fff;
+  color: #475467;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
 }
 
 .workspace {
@@ -302,7 +364,7 @@
 }
 
 .history-sidebar {
-  background: #0f172a;
+  background: linear-gradient(180deg, #0f172a 0%, #111827 45%, #0b1224 100%);
   color: #e2e8f0;
   border-radius: 16px;
   padding: 1rem;
@@ -312,7 +374,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.3);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.35);
   transition: width 0.2s ease, padding 0.2s ease;
 }
 
@@ -324,12 +386,16 @@
 
 .collapse-btn {
   width: 100%;
-  border: 1px solid rgba(226, 232, 240, 0.2);
-  background: transparent;
+  border: 1px solid rgba(226, 232, 240, 0.15);
+  background: rgba(255, 255, 255, 0.06);
   color: #e2e8f0;
-  border-radius: 12px;
-  padding: 0.4rem 0.6rem;
+  border-radius: 50px;
+  padding: 0.35rem 0.6rem;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
 }
 
 .history-sidebar.collapsed .collapse-btn {
@@ -397,8 +463,8 @@
 
 .sidebar-settings {
   margin-top: auto;
-  border: 1px solid rgba(226, 232, 240, 0.3);
-  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(226, 232, 240, 0.18);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(14, 165, 233, 0.25));
   color: #fff;
   padding: 0.6rem 0.8rem;
   border-radius: 12px;
@@ -1055,6 +1121,10 @@
   .hero-metrics {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .settings-shell {
+    display: block;
   }
 }
 

@@ -31,7 +31,7 @@ defineProps({
   >
     <div class="card-header">
       <div>
-        <h2>步骤 1 · 上传图片</h2>
+        <h2>上传图片</h2>
         <p>支持 PNG、JPG、JPEG，最大 {{ uploadLimitLabel }} MB。</p>
       </div>
       <button v-if="hasImage" class="ghost" type="button" @click="onClear">

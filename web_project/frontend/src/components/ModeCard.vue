@@ -17,7 +17,7 @@ defineProps({
   <article class="card mode-card">
     <div class="card-header">
       <div>
-        <h2>步骤 2 · 选择模式</h2>
+        <h2>选择模式</h2>
         <p>根据速度与质量的平衡点选择推理配置。</p>
       </div>
       <button class="ghost" type="button" @click="onFetchModes" :disabled="isFetchingModes">

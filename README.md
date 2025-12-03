@@ -2,13 +2,19 @@
 
 English | [中文](README_zh.md)
 
-FastAPI + Vite/React wrapper around the DeepSeek-OCR model for quick local testing. 🎯
+FastAPI + Vite/Vue wrapper around the DeepSeek-OCR model for quick local testing. 🎯
+
+![Demo showcase](assets/showcase.gif)
 
 ## Features ✨
 - 📄 PDF & 🖼️ image upload, with automatic PDF page splitting.
 - ⏳ Progress visualization during uploads/inference so you know it’s working.
 - 🗺️ Bounding-box overlay for layout/annotation visualization.
 - 📑 Annotation detail view for extracted labels/regions.
+- 📜 History management: View and manage past OCR results.
+- 🧩 Modular UI: Specialized components for Upload, Prompt, Mode, and Actions.
+- 📊 Enhanced Visualization: Visual preview, layout details, and page text inspection.
+- 📝 Logs & Workflow: Real-time logs and workflow step tracking.
 
 Screenshots:
 - Overlay view: ![Annotation overlay](assets/image1.png)

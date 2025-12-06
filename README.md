@@ -4,8 +4,14 @@ English | [中文](README_zh.md)
 
 FastAPI + Vite/Vue wrapper around the DeepSeek-OCR model for quick local testing. 🎯
 
-Showcase:
-![Demo showcase](assets/showcase.gif)
+## Showcase:
+Showcase: Mathematical Formula Recognition
+![Mathematical Formula Recognition](assets/showcase_math.gif)
+
+Showcase: Table Data Processing
+![Table Data Processing](assets/showcase.gif)
+
+
 
 ## Features ✨
 - 📄 PDF & 🖼️ image upload, with automatic PDF page splitting.

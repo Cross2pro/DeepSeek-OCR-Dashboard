@@ -4,8 +4,12 @@
 
 FastAPI 后端 + Vite/Vue 前端的 DeepSeek-OCR 本地演示项目。
 
-演示动画：
-![演示动画](assets/showcase.gif)
+## 演示动画：
+数学公式识别：
+![数学公式识别](assets/showcase_math.gif)
+
+表格数据处理：
+![表格数据处理](assets/showcase.gif)
 
 ## 功能特性 ✨
 - 支持 PDF / 图片上传，PDF 自动分页处理。
